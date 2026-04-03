@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/context/Authcontext";
 import { getDmConversations, DmConversationItem } from "@/lib/api/dm";
+import { usePresenceStore, presenceColor } from "@/store/presence-store";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { FiPlus } from "react-icons/fi";
@@ -18,6 +19,9 @@ export default function DMList() {
 
     const [conversations, setConversations] = useState<DmConversationItem[]>([]);
     const [showModal, setShowModal] = useState(false);
+
+    // Shared presence store — same source of truth as WorkspaceMenu
+    const { isOnline } = usePresenceStore();
 
     const loadConversations = () => {
         if (!workspaceId || !user?.id) return;
@@ -38,7 +42,6 @@ export default function DMList() {
 
     const handleModalClose = () => {
         setShowModal(false);
-        // Refresh list after creating a new DM
         loadConversations();
     };
 
@@ -53,6 +56,9 @@ export default function DMList() {
                             typeof window !== "undefined" &&
                             window.location.pathname.includes(conv.id);
 
+                        const otherUserId = conv.otherUser?.id;
+                        const online = otherUserId ? isOnline(otherUserId) : false;
+
                         return (
                             <button
                                 key={conv.id}
@@ -63,11 +69,18 @@ export default function DMList() {
                                         : "hover:bg-white/10 text-white/80"
                                 }`}
                             >
-                                <img
-                                    src={getAvatarUrl(conv.otherUser?.avatar)}
-                                    alt={getDisplayName(conv)}
-                                    className="w-5 h-5 rounded shrink-0"
-                                />
+                                {/* Avatar with presence dot */}
+                                <div className="relative shrink-0">
+                                    <img
+                                        src={getAvatarUrl(conv.otherUser?.avatar)}
+                                        alt={getDisplayName(conv)}
+                                        className="w-5 h-5 rounded"
+                                    />
+                                    {/* Presence dot — green = joined, #3F0E40 = unjoined */}
+                                    <span
+                                        className={`absolute bottom-[-1px] right-[-1px] w-2 h-2 rounded-full border border-[rgb(92,42,92)] ${presenceColor(online)}`}
+                                    />
+                                </div>
                                 <span className="text-sm truncate">{getDisplayName(conv)}</span>
                             </button>
                         );

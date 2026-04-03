@@ -70,8 +70,8 @@ export const WorkSpace = (props: { userData: any }) => {
 
     return (
         <div className="w-[75px] min-w-[75px] bg-gradient-to-b from-[#4A154B] to-[#3F0E40] flex flex-col items-center py-2">
-            {/* Workspace avatar */}
-            <div className="w-10 h-10 text-[22px] cursor-pointer rounded-xl bg-[#867688] flex items-center justify-center font-medium mb-3">
+            {/* Workspace avatar — shows first letter of workspace name */}
+            <div className="mb-3">
                 <WorkspaceAvatar userData={props.userData} />
             </div>
 

@@ -37,6 +37,10 @@ export default function ClientLayout({ children }: { children: ReactNode }) {
         }
 
         setUser(data);
+        // Store userId so SocketProvider can send it as a presence identifier
+        if (data?.id) {
+          localStorage.setItem("userId", data.id);
+        }
 
       } catch (error) {
         console.error("Auth check failed:", error);

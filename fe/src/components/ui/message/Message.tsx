@@ -117,7 +117,7 @@ export const SlackMessage: React.FC<SlackMessageProps> = ({
     if (spaceBelow >= pickerHeight + offset) {
       top = rect.bottom + offset;
     } else if (spaceAbove >= pickerHeight + offset) {
-      top = rect.top - pickerHeight - offset-40;
+      top = rect.top - pickerHeight - offset-34;
     } else {
       // fallback clamp
       top = Math.max(offset, window.innerHeight - pickerHeight - offset);

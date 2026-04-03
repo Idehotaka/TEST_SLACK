@@ -74,7 +74,7 @@ export default function NewDmModal({ onClose }: NewDmModalProps) {
                         placeholder="Search workspace members..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-blue-400"
+                        className="w-full text-sm text-black border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-blue-400"
                         autoFocus
                     />
                 </div>
