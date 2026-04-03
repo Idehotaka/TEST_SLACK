@@ -57,13 +57,17 @@ export default function MessageEditor({
     // DM mode — requires dmConversationId, no channelId needed
     if (dmConversationId) {
       const content = editor.getHTML();
-      const payload = {
+      const payload: Record<string, unknown> = {
         conversationId: dmConversationId,
         senderId: userData.id,
         content,
       };
+      // Include parentId if this is a DM thread reply
+      if (parentMessageId?.trim()) {
+        payload.parentId = parentMessageId;
+      }
       socket.emit("send_dm_message", payload);
-      onMessageSent?.(payload as Record<string, unknown>);
+      onMessageSent?.(payload);
       editor.commands.clearContent();
       return;
     }

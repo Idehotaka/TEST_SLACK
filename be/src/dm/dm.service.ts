@@ -9,8 +9,16 @@ import { Repository, DataSource } from 'typeorm';
 import { DmConversation } from './entities/dm-conversation.entity';
 import { DmParticipant } from './entities/dm-participant.entity';
 import { DmMessage } from './entities/dm-message.entity';
+import { DmMessageReaction } from './entities/dm-message-reaction.entity';
+import { DmMessageReactionUser } from './entities/dm-message-reaction-user.entity';
 import { Workspace } from 'src/workspace/entities/workspace.entity';
 import { User } from 'src/user/entities/user.entity';
+
+export interface DmReactionView {
+    emoji: string;
+    count: number;
+    reactedUserIds: string[];
+}
 
 @Injectable()
 export class DmService {
@@ -21,6 +29,10 @@ export class DmService {
         private participantRepo: Repository<DmParticipant>,
         @InjectRepository(DmMessage)
         private messageRepo: Repository<DmMessage>,
+        @InjectRepository(DmMessageReaction)
+        private reactionRepo: Repository<DmMessageReaction>,
+        @InjectRepository(DmMessageReactionUser)
+        private reactionUserRepo: Repository<DmMessageReactionUser>,
         @InjectRepository(Workspace)
         private workspaceRepo: Repository<Workspace>,
         @InjectRepository(User)
@@ -28,10 +40,8 @@ export class DmService {
         private dataSource: DataSource,
     ) {}
 
-    /**
-     * Returns workspace members that can be selected as DM targets.
-     * Excludes the requesting user from the list.
-     */
+    // ── Workspace candidates ──────────────────────────────────────────────────
+
     async getCandidates(workspaceId: string, currentUserId: string) {
         const workspace = await this.workspaceRepo.findOne({
             where: { id: workspaceId },
@@ -52,10 +62,8 @@ export class DmService {
             }));
     }
 
-    /**
-     * Create or retrieve a one-to-one DM conversation between two workspace members.
-     * Enforces: both users must be workspace members, no duplicate conversations.
-     */
+    // ── Conversations ─────────────────────────────────────────────────────────
+
     async getOrCreateConversation(
         workspaceId: string,
         currentUserId: string,
@@ -65,7 +73,6 @@ export class DmService {
             throw new BadRequestException('Cannot create a DM with yourself');
         }
 
-        // Validate both users are workspace members
         const workspace = await this.workspaceRepo.findOne({
             where: { id: workspaceId },
             relations: ['members'],
@@ -80,7 +87,6 @@ export class DmService {
             throw new ForbiddenException('Target user is not a workspace member');
         }
 
-        // Look for an existing conversation between these two users in this workspace
         const existing = await this.dataSource
             .createQueryBuilder(DmConversation, 'conv')
             .innerJoin('conv.participants', 'p1', 'p1.userId = :uid1', { uid1: currentUserId })
@@ -88,32 +94,19 @@ export class DmService {
             .where('conv.workspaceId = :workspaceId', { workspaceId })
             .getOne();
 
-        if (existing) {
-            return this.formatConversation(existing, currentUserId);
-        }
+        if (existing) return this.formatConversation(existing);
 
-        // Create new conversation with both participants in a transaction
         const conversation = await this.dataSource.transaction(async (manager) => {
             const conv = manager.create(DmConversation, { workspaceId });
             const saved = await manager.save(conv);
-
-            await manager.save(
-                manager.create(DmParticipant, { conversationId: saved.id, userId: currentUserId }),
-            );
-            await manager.save(
-                manager.create(DmParticipant, { conversationId: saved.id, userId: targetUserId }),
-            );
-
+            await manager.save(manager.create(DmParticipant, { conversationId: saved.id, userId: currentUserId }));
+            await manager.save(manager.create(DmParticipant, { conversationId: saved.id, userId: targetUserId }));
             return saved;
         });
 
-        return this.formatConversation(conversation, currentUserId);
+        return this.formatConversation(conversation);
     }
 
-    /**
-     * List all DM conversations for the current user in a workspace,
-     * ordered by most recent activity.
-     */
     async listConversations(workspaceId: string, currentUserId: string) {
         const participants = await this.participantRepo.find({
             where: { userId: currentUserId },
@@ -124,18 +117,15 @@ export class DmService {
             .map((p) => p.conversation)
             .filter((c) => c.workspaceId === workspaceId);
 
-        // Fetch latest message for each conversation
         const result = await Promise.all(
             conversations.map(async (conv) => {
                 const latestMessage = await this.messageRepo.findOne({
-                    where: { conversationId: conv.id },
+                    where: { conversationId: conv.id, parentId: null as any },
                     order: { createdAt: 'DESC' },
                     relations: ['sender'],
                 });
 
-                const otherParticipant = conv.participants.find(
-                    (p) => p.userId !== currentUserId,
-                );
+                const otherParticipant = conv.participants.find((p) => p.userId !== currentUserId);
 
                 return {
                     id: conv.id,
@@ -161,7 +151,6 @@ export class DmService {
             }),
         );
 
-        // Sort by most recent activity
         return result.sort((a, b) => {
             const aTime = a.lastMessageAt ?? a.updatedAt;
             const bTime = b.lastMessageAt ?? b.updatedAt;
@@ -169,63 +158,168 @@ export class DmService {
         });
     }
 
-    /**
-     * Fetch messages for a DM conversation.
-     * Validates the requesting user is a participant.
-     */
+    // ── Messages ──────────────────────────────────────────────────────────────
+
+    /** Fetch root messages only (parentId IS NULL) for the DM main list */
     async getMessages(conversationId: string, currentUserId: string) {
         await this.assertParticipant(conversationId, currentUserId);
 
-        return this.messageRepo.find({
-            where: { conversationId },
+        const messages = await this.messageRepo.find({
+            where: { conversationId, parentId: null as any },
             order: { createdAt: 'ASC' },
-            relations: ['sender'],
+            relations: ['sender', 'reactions', 'reactions.users'],
         });
+
+        return messages.map((m) => this.formatMessage(m));
     }
 
-    /**
-     * Send a DM message.
-     * Validates the sender is a participant.
-     */
-    async sendMessage(
-        conversationId: string,
-        senderId: string,
-        content: string,
-    ) {
+    async sendMessage(conversationId: string, senderId: string, content: string, parentId?: string) {
         if (!content?.trim()) throw new BadRequestException('Content cannot be empty');
 
         await this.assertParticipant(conversationId, senderId);
 
-        const message = this.messageRepo.create({ conversationId, senderId, content });
+        let threadRootId: string | undefined;
+
+        if (parentId) {
+            const parent = await this.messageRepo.findOne({ where: { id: parentId } });
+            if (!parent) throw new NotFoundException('Parent message not found');
+            threadRootId = parent.threadRootId ?? parent.id;
+        }
+
+        const message = this.messageRepo.create({
+            conversationId,
+            senderId,
+            content,
+            parentId: parentId ?? undefined,
+            threadRootId: threadRootId ?? undefined,
+        });
         const saved = await this.messageRepo.save(message);
 
-        // Update conversation lastMessageAt
+        // Update thread metadata on root message
+        if (threadRootId) {
+            await this.messageRepo.increment({ id: threadRootId }, 'replyCount', 1);
+            await this.messageRepo.update(threadRootId, { lastReplyAt: new Date() });
+        }
+
         await this.conversationRepo.update(conversationId, { lastMessageAt: new Date() });
 
-        // Return with sender populated
-        return this.messageRepo.findOne({
+        const full = await this.messageRepo.findOne({
             where: { id: saved.id },
-            relations: ['sender'],
+            relations: ['sender', 'reactions', 'reactions.users'],
         });
+
+        return this.formatMessage(full!);
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────────
+    // ── Threads ───────────────────────────────────────────────────────────────
+
+    /** Fetch a DM thread: root message + all replies ordered ASC */
+    async getThread(messageId: string, currentUserId: string) {
+        const message = await this.messageRepo.findOne({ where: { id: messageId } });
+        if (!message) throw new NotFoundException('Message not found');
+
+        await this.assertParticipant(message.conversationId, currentUserId);
+
+        const threadRootId = message.threadRootId ?? message.id;
+
+        const messages = await this.messageRepo.find({
+            where: [
+                { id: threadRootId },
+                { threadRootId },
+            ],
+            relations: ['sender', 'reactions', 'reactions.users'],
+            order: { createdAt: 'ASC' },
+        });
+
+        return messages.map((m) => this.formatMessage(m));
+    }
+
+    // ── Reactions ─────────────────────────────────────────────────────────────
+
+    /**
+     * Toggle a reaction on a DM message.
+     * Mirrors the channel reaction toggle logic exactly.
+     * Returns the full updated reactions array for the message.
+     */
+    async toggleReaction(messageId: string, emoji: string, userId: string): Promise<DmReactionView[]> {
+        // Verify the message exists and the user is a participant
+        const message = await this.messageRepo.findOne({ where: { id: messageId } });
+        if (!message) throw new NotFoundException('DM message not found');
+        await this.assertParticipant(message.conversationId, userId);
+
+        await this.dataSource.transaction(async (manager) => {
+            const reactionRepo = manager.getRepository(DmMessageReaction);
+            const userRepo = manager.getRepository(DmMessageReactionUser);
+
+            const existing = await reactionRepo.findOne({
+                where: { messageId, emoji },
+                relations: ['users'],
+            });
+
+            if (!existing) {
+                const reaction = reactionRepo.create({ messageId, emoji });
+                const saved = await reactionRepo.save(reaction);
+                await userRepo.save(userRepo.create({ messageReactionId: saved.id, userId }));
+                return;
+            }
+
+            const userEntry = existing.users.find((u) => u.userId === userId);
+            if (userEntry) {
+                await userRepo.delete(userEntry.id);
+                if (existing.users.length === 1) {
+                    await reactionRepo.delete(existing.id);
+                }
+            } else {
+                await userRepo.save(userRepo.create({ messageReactionId: existing.id, userId }));
+            }
+        });
+
+        // Return full updated reactions
+        const rows = await this.reactionRepo.find({
+            where: { messageId },
+            relations: ['users'],
+        });
+
+        return rows.map((r) => ({
+            emoji: r.emoji,
+            count: r.users.length,
+            reactedUserIds: r.users.map((u) => u.userId),
+        }));
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
 
     private async assertParticipant(conversationId: string, userId: string) {
         const participant = await this.participantRepo.findOne({
             where: { conversationId, userId },
         });
-        if (!participant) {
-            throw new ForbiddenException('Not a participant in this conversation');
-        }
+        if (!participant) throw new ForbiddenException('Not a participant in this conversation');
     }
 
-    private formatConversation(conv: DmConversation, currentUserId: string) {
+    private formatConversation(conv: DmConversation) {
+        return { id: conv.id, workspaceId: conv.workspaceId, createdAt: conv.createdAt, updatedAt: conv.updatedAt };
+    }
+
+    /** Normalize a DmMessage into the shape the frontend expects (mirrors channel formatMessage) */
+    formatMessage(message: DmMessage) {
+        const reactions: DmReactionView[] = (message.reactions ?? []).map((r) => ({
+            emoji: r.emoji,
+            count: r.users?.length ?? 0,
+            reactedUserIds: r.users?.map((u) => u.userId) ?? [],
+        }));
+
         return {
-            id: conv.id,
-            workspaceId: conv.workspaceId,
-            createdAt: conv.createdAt,
-            updatedAt: conv.updatedAt,
+            id: message.id,
+            conversationId: message.conversationId,
+            content: message.content,
+            sender: message.sender,
+            parentId: message.parentId ?? null,
+            threadRootId: message.threadRootId ?? null,
+            replyCount: message.replyCount,
+            lastReplyAt: message.lastReplyAt ?? null,
+            createdAt: message.createdAt,
+            updatedAt: message.updatedAt,
+            reactions,
         };
     }
 }

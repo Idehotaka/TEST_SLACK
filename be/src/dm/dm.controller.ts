@@ -1,27 +1,22 @@
-import {
-    Controller,
-    Get,
-    Post,
-    Body,
-    Param,
-    Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query } from '@nestjs/common';
 import { DmService } from './dm.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { SendDmMessageDto } from './dto/send-dm-message.dto';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
-/**
- * All DM routes are scoped to a workspace so the backend can enforce
- * the "only workspace members can DM each other" rule.
- */
+class ToggleDmReactionDto {
+    @IsString() @IsNotEmpty() emoji: string;
+    @IsString() @IsNotEmpty() userId: string;
+}
+
+class SendDmMessageWithParentDto extends SendDmMessageDto {
+    @IsOptional() @IsString() parentId?: string;
+}
+
 @Controller('workspaces/:workspaceId/dm')
 export class DmController {
     constructor(private readonly dmService: DmService) {}
 
-    /**
-     * GET /workspaces/:workspaceId/dm/candidates?currentUserId=...
-     * Returns workspace members that can be selected as DM targets.
-     */
     @Get('candidates')
     getCandidates(
         @Param('workspaceId') workspaceId: string,
@@ -30,10 +25,6 @@ export class DmController {
         return this.dmService.getCandidates(workspaceId, currentUserId);
     }
 
-    /**
-     * GET /workspaces/:workspaceId/dm/conversations?currentUserId=...
-     * Lists all DM conversations for the current user in this workspace.
-     */
     @Get('conversations')
     listConversations(
         @Param('workspaceId') workspaceId: string,
@@ -42,25 +33,15 @@ export class DmController {
         return this.dmService.listConversations(workspaceId, currentUserId);
     }
 
-    /**
-     * POST /workspaces/:workspaceId/dm/conversations
-     * Create or retrieve a one-to-one DM conversation.
-     */
     @Post('conversations')
     getOrCreate(
         @Param('workspaceId') workspaceId: string,
         @Body() dto: CreateConversationDto,
     ) {
-        return this.dmService.getOrCreateConversation(
-            workspaceId,
-            dto.currentUserId,
-            dto.targetUserId,
-        );
+        return this.dmService.getOrCreateConversation(workspaceId, dto.currentUserId, dto.targetUserId);
     }
 
-    /**
-     * GET /workspaces/:workspaceId/dm/conversations/:conversationId/messages?currentUserId=...
-     */
+    /** GET root messages only (parentId IS NULL) */
     @Get('conversations/:conversationId/messages')
     getMessages(
         @Param('conversationId') conversationId: string,
@@ -69,14 +50,31 @@ export class DmController {
         return this.dmService.getMessages(conversationId, currentUserId);
     }
 
-    /**
-     * POST /workspaces/:workspaceId/dm/conversations/:conversationId/messages
-     */
+    /** POST a root or thread reply DM message */
     @Post('conversations/:conversationId/messages')
     sendMessage(
         @Param('conversationId') conversationId: string,
-        @Body() dto: SendDmMessageDto,
+        @Body() dto: SendDmMessageWithParentDto,
     ) {
-        return this.dmService.sendMessage(conversationId, dto.senderId, dto.content);
+        return this.dmService.sendMessage(conversationId, dto.senderId, dto.content, dto.parentId);
+    }
+
+    /** GET thread: root message + all replies for a DM message */
+    @Get('conversations/:conversationId/messages/:messageId/thread')
+    getThread(
+        @Param('messageId') messageId: string,
+        @Query('currentUserId') currentUserId: string,
+    ) {
+        return this.dmService.getThread(messageId, currentUserId);
+    }
+
+    /** PATCH toggle a reaction on a DM message */
+    @Patch('conversations/:conversationId/messages/:messageId/reaction')
+    toggleReaction(
+        @Param('messageId') messageId: string,
+        @Body() dto: ToggleDmReactionDto,
+    ) {
+        return this.dmService.toggleReaction(messageId, dto.emoji, dto.userId)
+            .then((reactions) => ({ messageId, reactions }));
     }
 }

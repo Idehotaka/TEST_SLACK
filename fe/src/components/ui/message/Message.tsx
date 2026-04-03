@@ -38,6 +38,11 @@ interface SlackMessageProps {
   onReactionUpdate: (messageId: string, reactions: ReactionView[]) => void;
   /** Hide the thread/reply button — used in DM mode where threads don't apply */
   hideThreadButton?: boolean;
+  /**
+   * When set, emoji selection calls this instead of the channel toggleReaction API.
+   * Used in DM mode where reactions go through a different endpoint.
+   */
+  onDmReactionSelect?: (emoji: string) => void;
 }
 
 export const SlackMessage: React.FC<SlackMessageProps> = ({
@@ -57,6 +62,7 @@ export const SlackMessage: React.FC<SlackMessageProps> = ({
   onCommentClick,
   onReactionUpdate,
   hideThreadButton = false,
+  onDmReactionSelect,
 }) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [showFiles, setShowFiles] = useState(true);
@@ -68,12 +74,21 @@ export const SlackMessage: React.FC<SlackMessageProps> = ({
   const emojiBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const handleEmojiSelect = async (emoji: string) => {
-    if (!messageId || !emoji || !currentUserId || !channelId) return;
+    if (!messageId || !emoji || !currentUserId) return;
     if (isPending) return;
 
     setShowEmoji(false);
-    setIsPending(true);
 
+    // DM mode — delegate to parent handler which calls the DM reaction endpoint
+    if (onDmReactionSelect) {
+      onDmReactionSelect(emoji);
+      return;
+    }
+
+    // Channel mode — requires channelId
+    if (!channelId) return;
+
+    setIsPending(true);
     try {
       const result = await toggleReaction(channelId, messageId, emoji, currentUserId);
       onReactionUpdate(result.messageId, result.reactions);

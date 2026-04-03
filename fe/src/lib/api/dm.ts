@@ -32,6 +32,11 @@ export interface DmMessageItem {
     content: string;
     createdAt: string;
     updatedAt: string;
+    parentId: string | null;
+    threadRootId: string | null;
+    replyCount: number;
+    lastReplyAt: string | null;
+    reactions: import('@/lib/api/reactions').ReactionView[];
     sender: {
         id: string;
         dispname: string | null;
@@ -103,5 +108,40 @@ export async function getDmMessages(
         { headers: authHeaders() },
     );
     if (!res.ok) throw new Error('Failed to fetch DM messages');
+    return res.json();
+}
+
+/** Fetch a DM thread: root message + all replies */
+export async function getDmThread(
+    workspaceId: string,
+    conversationId: string,
+    messageId: string,
+    currentUserId: string,
+): Promise<DmMessageItem[]> {
+    const res = await fetch(
+        `${BASE}/api/workspaces/${workspaceId}/dm/conversations/${conversationId}/messages/${messageId}/thread?currentUserId=${currentUserId}`,
+        { headers: authHeaders() },
+    );
+    if (!res.ok) throw new Error('Failed to fetch DM thread');
+    return res.json();
+}
+
+/** Toggle a reaction on a DM message */
+export async function toggleDmReaction(
+    workspaceId: string,
+    conversationId: string,
+    messageId: string,
+    emoji: string,
+    userId: string,
+): Promise<{ messageId: string; reactions: import('@/lib/api/reactions').ReactionView[] }> {
+    const res = await fetch(
+        `${BASE}/api/workspaces/${workspaceId}/dm/conversations/${conversationId}/messages/${messageId}/reaction`,
+        {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify({ emoji, userId }),
+        },
+    );
+    if (!res.ok) throw new Error('Failed to toggle DM reaction');
     return res.json();
 }

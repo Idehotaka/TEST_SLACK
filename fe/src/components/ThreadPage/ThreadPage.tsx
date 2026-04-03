@@ -17,13 +17,17 @@ interface UserData {
 interface ThreadProps {
   onCloseThread: () => void;
   userData: UserData | null;
-  channelId: string;
+  /** Set when the thread belongs to a channel conversation */
+  channelId?: string;
+  /** Set when the thread belongs to a DM conversation */
+  dmConversationId?: string;
 }
 
 export const Thread: React.FC<ThreadProps> = ({
   onCloseThread,
   userData,
   channelId,
+  dmConversationId,
 }) => {
   const { socket } = useSocket();
   const {
@@ -36,6 +40,9 @@ export const Thread: React.FC<ThreadProps> = ({
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
+  // The conversation id used for socket room scoping
+  const roomId = dmConversationId ? `dm:${dmConversationId}` : channelId;
+
   useEffect(() => {
     if (!socket || !selectedMessage) return;
 
@@ -46,18 +53,21 @@ export const Thread: React.FC<ThreadProps> = ({
       }
     };
 
-    // Sync reaction updates that arrive via socket for any message in this thread
     const handleReactionUpdated = (payload: { messageId: string; reactions: ReactionView[] }) => {
       updateThreadMessageReactions(payload.messageId, payload.reactions);
     };
 
-    socket.on("new_thread_message", handleNewThreadMessage);
-    socket.on("reaction_updated", handleReactionUpdated);
+    // Listen on the correct event name depending on mode
+    const threadEvent = dmConversationId ? "new_dm_thread_message" : "new_thread_message";
+    const reactionEvent = dmConversationId ? "dm_reaction_updated" : "reaction_updated";
+
+    socket.on(threadEvent, handleNewThreadMessage);
+    socket.on(reactionEvent, handleReactionUpdated);
     return () => {
-      socket.off("new_thread_message", handleNewThreadMessage);
-      socket.off("reaction_updated", handleReactionUpdated);
+      socket.off(threadEvent, handleNewThreadMessage);
+      socket.off(reactionEvent, handleReactionUpdated);
     };
-  }, [socket, selectedMessage, appendThreadMessage, updateThreadMessageReactions]);
+  }, [socket, selectedMessage, dmConversationId, appendThreadMessage, updateThreadMessageReactions]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -70,8 +80,14 @@ export const Thread: React.FC<ThreadProps> = ({
 
   const handleReactionUpdate = (messageId: string, reactions: ReactionView[]) => {
     updateThreadMessageReactions(messageId, reactions);
-    if (socket && channelId) {
-      socket.emit("toggle_reaction", { channelId, messageId, reactions });
+    if (socket) {
+      if (dmConversationId) {
+        // DM reaction broadcast
+        socket.emit("toggle_dm_reaction", { conversationId: dmConversationId, messageId, reactions });
+      } else if (channelId) {
+        // Channel reaction broadcast
+        socket.emit("toggle_reaction", { channelId, messageId, reactions });
+      }
     }
   };
 
@@ -110,7 +126,7 @@ export const Thread: React.FC<ThreadProps> = ({
                 replies={0}
                 lastReply=""
                 messageId={rootMsg.id}
-                channelId={channelId}
+                channelId={channelId ?? ""}
                 currentUserId={userData?.id ?? null}
                 onCommentClick={() => {}}
                 onReactionUpdate={handleReactionUpdate}
@@ -139,7 +155,7 @@ export const Thread: React.FC<ThreadProps> = ({
                 replies={0}
                 lastReply=""
                 messageId={reply.id}
-                channelId={channelId}
+                channelId={channelId ?? ""}
                 currentUserId={userData?.id ?? null}
                 onCommentClick={() => {}}
                 onReactionUpdate={handleReactionUpdate}
@@ -157,11 +173,12 @@ export const Thread: React.FC<ThreadProps> = ({
         )}
       </div>
 
-      {/* Reply editor */}
+      {/* Reply editor — works in both channel and DM thread mode */}
       <div className="shrink-0 px-3 pb-4 pt-2 border-t border-gray-100">
         <MessageEditor
           userData={userData}
           parentMessageId={selectedMessage?.id ?? null}
+          dmConversationId={dmConversationId ?? null}
           placeholder="Reply in thread..."
         />
       </div>

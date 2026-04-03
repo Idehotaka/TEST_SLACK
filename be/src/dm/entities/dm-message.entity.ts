@@ -3,12 +3,14 @@ import {
     PrimaryGeneratedColumn,
     Column,
     ManyToOne,
+    OneToMany,
     JoinColumn,
     CreateDateColumn,
     UpdateDateColumn,
 } from 'typeorm';
 import { DmConversation } from './dm-conversation.entity';
 import { User } from 'src/user/entities/user.entity';
+import { DmMessageReaction } from './dm-message-reaction.entity';
 
 @Entity('dm_messages')
 export class DmMessage {
@@ -31,6 +33,30 @@ export class DmMessage {
 
     @Column('text')
     content: string;
+
+    // Thread: self-referential parent (mirrors channel Message entity)
+    @ManyToOne(() => DmMessage, (m) => m.replies, { nullable: true, onDelete: 'CASCADE' })
+    @JoinColumn({ name: 'parentId' })
+    parent: DmMessage;
+
+    @Column({ nullable: true })
+    parentId: string;
+
+    @OneToMany(() => DmMessage, (m: DmMessage) => m.parent)
+    replies: DmMessage[];
+
+    @Column({ nullable: true })
+    threadRootId: string;
+
+    @Column({ default: 0 })
+    replyCount: number;
+
+    @Column({ nullable: true })
+    lastReplyAt: Date;
+
+    // Reactions (mirrors channel MessageReaction pattern)
+    @OneToMany(() => DmMessageReaction, (r: DmMessageReaction) => r.message, { eager: false })
+    reactions: DmMessageReaction[];
 
     @CreateDateColumn()
     createdAt: Date;
