@@ -53,7 +53,7 @@ export class UserGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('register_user')
   handleRegisterUser(client: Socket, @MessageBody() userId: string) {
     if (userId) {
-      socketToUser.set(client.id, userId);
+      socketToUser.set(client?.id, userId);
       this.server.emit('user_presence', { userId, isOnline: true });
     }
   }
