@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/context/Authcontext";
 import { useSocket } from "@/providers/SocketProvider";
-import { getDmMessages, DmMessageItem } from "@/lib/api/dm";
+import { getDmMessages, getDmConversations, DmMessageItem, DmConversationItem } from "@/lib/api/dm";
 import DOMPurify from "dompurify";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -21,15 +21,24 @@ export default function DmPage({ conversationId }: DmPageProps) {
         : params.workspaceId;
 
     const [messages, setMessages] = useState<DmMessageItem[]>([]);
+    const [conversation, setConversation] = useState<DmConversationItem | null>(null);
     const [loading, setLoading] = useState(true);
     const bottomRef = useRef<HTMLDivElement | null>(null);
 
-    // Load message history
+    // Load conversation info (for header) and message history
     useEffect(() => {
         if (!conversationId || !user?.id || !workspaceId) return;
         setLoading(true);
-        getDmMessages(workspaceId, conversationId, user.id)
-            .then(setMessages)
+
+        Promise.all([
+            getDmMessages(workspaceId, conversationId, user.id),
+            getDmConversations(workspaceId, user.id),
+        ])
+            .then(([msgs, convs]) => {
+                setMessages(msgs);
+                const found = convs.find((c) => c.id === conversationId) ?? null;
+                setConversation(found);
+            })
             .catch(console.error)
             .finally(() => setLoading(false));
     }, [conversationId, user?.id, workspaceId]);
@@ -68,11 +77,27 @@ export default function DmPage({ conversationId }: DmPageProps) {
     const getAvatarUrl = (sender: DmMessageItem["sender"]) =>
         `${process.env.NEXT_PUBLIC_SOCKET_URL ?? ""}${sender?.avatar ?? "/uploads/avatar.png"}`;
 
+    const otherUserName =
+        conversation?.otherUser?.dispname ||
+        conversation?.otherUser?.email ||
+        "Direct Message";
+
+    const otherUserAvatar = conversation?.otherUser?.avatar
+        ? `${process.env.NEXT_PUBLIC_SOCKET_URL ?? ""}${conversation.otherUser.avatar}`
+        : null;
+
     return (
         <div className="flex flex-col h-full bg-white">
-            {/* Header */}
-            <div className="px-6 py-3 border-b border-gray-200 shrink-0">
-                <h2 className="font-semibold text-gray-800 text-base">Direct Message</h2>
+            {/* Header — shows the other user's name */}
+            <div className="px-6 py-3 border-b border-gray-200 shrink-0 flex items-center gap-3">
+                {otherUserAvatar && (
+                    <img
+                        src={otherUserAvatar}
+                        alt={otherUserName}
+                        className="w-7 h-7 rounded-lg"
+                    />
+                )}
+                <h2 className="font-semibold text-gray-800 text-base">{otherUserName}</h2>
             </div>
 
             {/* Messages */}
