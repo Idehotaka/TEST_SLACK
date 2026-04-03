@@ -41,6 +41,15 @@ export class DmController {
         return this.dmService.getOrCreateConversation(workspaceId, dto.currentUserId, dto.targetUserId);
     }
 
+    /** POST mark a conversation as read for the current user */
+    @Post('conversations/:conversationId/read')
+    markAsRead(
+        @Param('conversationId') conversationId: string,
+        @Query('currentUserId') currentUserId: string,
+    ) {
+        return this.dmService.markAsRead(conversationId, currentUserId);
+    }
+
     /** GET root messages only (parentId IS NULL) */
     @Get('conversations/:conversationId/messages')
     getMessages(

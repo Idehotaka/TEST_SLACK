@@ -44,7 +44,10 @@ export const WorkSpace = (props: { userData: any }) => {
         if (!socket) return;
 
         socket.on("updated_profile", (data: any) => {
-            setUserState(data);
+            // Only update this user's state if the event is for the current user
+            if (data?.userId && props.userData?.id && data.userId === props.userData.id) {
+                setUserState((prev: any) => prev ? { ...prev, dispname: data.dispname, avatar: data.avatar } : prev);
+            }
         });
 
         // New channel message → increment "home" badge if user is not on a channel page

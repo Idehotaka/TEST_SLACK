@@ -21,6 +21,7 @@ export interface DmConversationItem {
         createdAt: string;
         senderId: string;
     } | null;
+    unreadCount: number;
     updatedAt: string;
     lastMessageAt: string | null;
 }
@@ -124,6 +125,18 @@ export async function getDmThread(
     );
     if (!res.ok) throw new Error('Failed to fetch DM thread');
     return res.json();
+}
+
+/** Mark a DM conversation as read for the current user */
+export async function markDmConversationAsRead(
+    workspaceId: string,
+    conversationId: string,
+    currentUserId: string,
+): Promise<void> {
+    await fetch(
+        `${BASE}/api/workspaces/${workspaceId}/dm/conversations/${conversationId}/read?currentUserId=${currentUserId}`,
+        { method: 'POST', headers: authHeaders() },
+    );
 }
 
 /** Toggle a reaction on a DM message */

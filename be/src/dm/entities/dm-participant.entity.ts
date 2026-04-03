@@ -13,6 +13,7 @@ import { User } from 'src/user/entities/user.entity';
 /**
  * Tracks which users participate in a DM conversation.
  * Unique constraint prevents a user from being added twice to the same conversation.
+ * lastReadAt tracks when the user last read this conversation — used for unread counts.
  */
 @Entity('dm_participants')
 @Unique(['conversationId', 'userId'])
@@ -33,6 +34,10 @@ export class DmParticipant {
 
     @Column()
     userId: string;
+
+    /** Timestamp of when this user last read this conversation */
+    @Column({ type: 'timestamp', nullable: true })
+    lastReadAt: Date | null;
 
     @CreateDateColumn()
     createdAt: Date;

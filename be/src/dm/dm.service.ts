@@ -126,6 +126,42 @@ export class DmService {
                 });
 
                 const otherParticipant = conv.participants.find((p) => p.userId !== currentUserId);
+                const myParticipant = conv.participants.find((p) => p.userId === currentUserId);
+
+                // Count messages sent after the current user's lastReadAt
+                let unreadCount = 0;
+                if (myParticipant) {
+                    const since = myParticipant.lastReadAt ?? new Date(0);
+                    unreadCount = await this.messageRepo.count({
+                        where: {
+                            conversationId: conv.id,
+                            parentId: null as any,
+                        },
+                    }).then(async () => {
+                        // Count messages newer than lastReadAt that were NOT sent by current user
+                        const { MoreThan } = await import('typeorm');
+                        return this.messageRepo.count({
+                            where: {
+                                conversationId: conv.id,
+                                parentId: null as any,
+                                createdAt: MoreThan(since),
+                            },
+                        });
+                    });
+                    // Subtract messages sent by the current user (they don't count as unread for themselves)
+                    if (unreadCount > 0) {
+                        const { MoreThan } = await import('typeorm');
+                        const ownMessages = await this.messageRepo.count({
+                            where: {
+                                conversationId: conv.id,
+                                senderId: currentUserId,
+                                parentId: null as any,
+                                createdAt: MoreThan(since),
+                            },
+                        });
+                        unreadCount = Math.max(0, unreadCount - ownMessages);
+                    }
+                }
 
                 return {
                     id: conv.id,
@@ -145,6 +181,7 @@ export class DmService {
                               senderId: latestMessage.senderId,
                           }
                         : null,
+                    unreadCount,
                     updatedAt: conv.updatedAt,
                     lastMessageAt: conv.lastMessageAt,
                 };
@@ -156,6 +193,16 @@ export class DmService {
             const bTime = b.lastMessageAt ?? b.updatedAt;
             return new Date(bTime).getTime() - new Date(aTime).getTime();
         });
+    }
+
+    /** Mark a conversation as read for the current user */
+    async markAsRead(conversationId: string, userId: string) {
+        await this.assertParticipant(conversationId, userId);
+        await this.participantRepo.update(
+            { conversationId, userId },
+            { lastReadAt: new Date() },
+        );
+        return { ok: true };
     }
 
     // ── Messages ──────────────────────────────────────────────────────────────

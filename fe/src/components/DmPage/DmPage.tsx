@@ -7,6 +7,7 @@ import {
     getDmConversations,
     getDmThread,
     toggleDmReaction,
+    markDmConversationAsRead,
     DmMessageItem,
     DmConversationItem,
 } from "@/lib/api/dm";
@@ -52,7 +53,7 @@ export default function DmPage({ conversationId }: DmPageProps) {
         updateThreadMessageReactions,
     } = useThreadStore();
 
-    // Load conversation info + root messages
+    // Load conversation info + root messages, and mark as read
     useEffect(() => {
         if (!conversationId || !user?.id || !workspaceId) return;
         setLoading(true);
@@ -65,6 +66,8 @@ export default function DmPage({ conversationId }: DmPageProps) {
                 setMessages(msgs);
                 const found = convs.find((c) => c.id === conversationId) ?? null;
                 setConversation(found);
+                // Mark as read when the conversation is opened
+                markDmConversationAsRead(workspaceId, conversationId, user.id).catch(() => {});
             })
             .catch(console.error)
             .finally(() => setLoading(false));
