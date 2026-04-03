@@ -171,6 +171,7 @@ export default function DmPage({ conversationId }: DmPageProps) {
                                     lastReply=""
                                     onCommentClick={() => {}}
                                     onReactionUpdate={handleReactionUpdate}
+                                    hideThreadButton
                                 />
                             ))}
                         </div>

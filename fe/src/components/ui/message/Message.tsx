@@ -36,6 +36,8 @@ interface SlackMessageProps {
   currentUserId: string | null;
   onCommentClick: () => void;
   onReactionUpdate: (messageId: string, reactions: ReactionView[]) => void;
+  /** Hide the thread/reply button — used in DM mode where threads don't apply */
+  hideThreadButton?: boolean;
 }
 
 export const SlackMessage: React.FC<SlackMessageProps> = ({
@@ -54,6 +56,7 @@ export const SlackMessage: React.FC<SlackMessageProps> = ({
   currentUserId,
   onCommentClick,
   onReactionUpdate,
+  hideThreadButton = false,
 }) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [showFiles, setShowFiles] = useState(true);
@@ -168,7 +171,7 @@ export const SlackMessage: React.FC<SlackMessageProps> = ({
             <LuSmilePlus />
           </button>
 
-          {state === "message" && (
+          {state === "message" && !hideThreadButton && (
             <button
               className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100"
               onClick={onCommentClick}
@@ -300,8 +303,8 @@ export const SlackMessage: React.FC<SlackMessageProps> = ({
               </div>
             )}
 
-            {/* Replies */}
-            {replies > 0 && state === "message" && (
+            {/* Replies — only shown in channel mode */}
+            {replies > 0 && state === "message" && !hideThreadButton && (
               <div className="flex items-center gap-2 mt-3 text-sm text-gray-500">
                 <img
                   src="/avatar.png"
