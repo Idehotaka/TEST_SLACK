@@ -21,6 +21,7 @@ interface FileItem {
 }
 
 interface SlackMessageProps {
+  id?: string;
   state: string;
   avatar: string;
   username: string;
@@ -38,6 +39,7 @@ interface SlackMessageProps {
 }
 
 export const SlackMessage: React.FC<SlackMessageProps> = ({
+  id,
   state,
   avatar,
   username,
@@ -139,6 +141,7 @@ export const SlackMessage: React.FC<SlackMessageProps> = ({
 
   return (
     <div
+      id={id}
       className="relative flex gap-3 px-[25px] py-2 bg-white text-gray-500 hover:bg-gray-100 w-full"
       onMouseOver={() => setShowToolbar(true)}
       onMouseLeave={() => {

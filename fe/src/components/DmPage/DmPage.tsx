@@ -2,16 +2,30 @@
 
 import { useAuth } from "@/context/Authcontext";
 import { useSocket } from "@/providers/SocketProvider";
-import { getDmMessages, getDmConversations, DmMessageItem, DmConversationItem } from "@/lib/api/dm";
-import DOMPurify from "dompurify";
+import {
+    getDmMessages,
+    getDmConversations,
+    DmMessageItem,
+    DmConversationItem,
+} from "@/lib/api/dm";
+import SlackLoader from "@/common/Loading";
+import SlackMessage from "@/components/ui/message/Message";
+import MessageEditor from "@/components/ui/messageEditor/MessageEditor";
+import DividerDate from "@/components/ui/dividerdate/DividerDate";
+import { ReactionView } from "@/lib/api/reactions";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import DmEditor from "@/components/DmPage/DmEditor";
 
 interface DmPageProps {
     conversationId: string;
 }
 
+/**
+ * DM conversation view.
+ * Reuses SlackMessage (message item) and MessageEditor (editor) from the
+ * channel UI — the same components, just driven by DM data instead of
+ * channel data. No separate DM-only rendering system.
+ */
 export default function DmPage({ conversationId }: DmPageProps) {
     const { user } = useAuth();
     const { socket } = useSocket();
@@ -59,23 +73,41 @@ export default function DmPage({ conversationId }: DmPageProps) {
         };
     }, [socket, conversationId]);
 
-    // Auto-scroll to bottom
+    // Auto-scroll to bottom on new messages
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    const formatTime = (iso: string) =>
-        new Date(iso).toLocaleTimeString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true,
+    // ── helpers shared with channel view ──────────────────────────────────────
+
+    const groupMessagesByDate = (msgs: DmMessageItem[]) => {
+        const groups: Record<string, DmMessageItem[]> = {};
+        msgs.forEach((m) => {
+            const date = new Date(m.createdAt).toDateString();
+            if (!groups[date]) groups[date] = [];
+            groups[date].push(m);
         });
+        return groups;
+    };
+
+    const sortedMessages = [...messages].sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+    const groupedMessages = groupMessagesByDate(sortedMessages);
 
     const getDisplayName = (sender: DmMessageItem["sender"]) =>
         sender?.dispname || sender?.email || "User";
 
     const getAvatarUrl = (sender: DmMessageItem["sender"]) =>
         `${process.env.NEXT_PUBLIC_SOCKET_URL ?? ""}${sender?.avatar ?? "/uploads/avatar.png"}`;
+
+    // DM messages don't use channel reactions — provide a no-op handler so
+    // SlackMessage renders correctly without crashing on undefined channelId.
+    const handleReactionUpdate = (_messageId: string, _reactions: ReactionView[]) => {
+        // Reactions on DM messages are not yet implemented — no-op keeps SlackMessage stable.
+    };
+
+    // ── header info ───────────────────────────────────────────────────────────
 
     const otherUserName =
         conversation?.otherUser?.dispname ||
@@ -84,70 +116,75 @@ export default function DmPage({ conversationId }: DmPageProps) {
 
     const otherUserAvatar = conversation?.otherUser?.avatar
         ? `${process.env.NEXT_PUBLIC_SOCKET_URL ?? ""}${conversation.otherUser.avatar}`
-        : null;
+        : `${process.env.NEXT_PUBLIC_SOCKET_URL ?? ""}/uploads/avatar.png`;
+
+    if (loading) return <SlackLoader />;
 
     return (
         <div className="flex flex-col h-full bg-white">
-            {/* Header — shows the other user's name */}
-            <div className="px-6 py-3 border-b border-gray-200 shrink-0 flex items-center gap-3">
-                {otherUserAvatar && (
-                    <img
-                        src={otherUserAvatar}
-                        alt={otherUserName}
-                        className="w-7 h-7 rounded-lg"
-                    />
-                )}
-                <h2 className="font-semibold text-gray-800 text-base">{otherUserName}</h2>
+            {/* ── Header — mirrors MainTopBar structure for channels ── */}
+            <div className="flex items-center gap-3 px-6 h-[49px] border-b border-gray-200 shrink-0">
+                <img
+                    src={otherUserAvatar}
+                    alt={otherUserName}
+                    className="w-7 h-7 rounded-lg"
+                />
+                <span className="font-semibold text-gray-800 text-base">
+                    {otherUserName}
+                </span>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto flex flex-col px-4 py-2">
-                {loading ? (
-                    <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                        Loading messages...
-                    </div>
-                ) : messages.length === 0 ? (
+            {/* ── Sub-header bar — mirrors MainBar ── */}
+            <div className="w-full h-[44px] border-b border-gray-200 flex items-center px-4 text-gray-500 text-sm shrink-0">
+                <span>Direct Message</span>
+            </div>
+
+            {/* ── Message list — same scroll container as channel view ── */}
+            <div className="flex-1 overflow-y-scroll flex flex-col">
+                {messages.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-gray-400 text-sm">
                         No messages yet. Say hello!
                     </div>
                 ) : (
-                    messages.map((msg) => (
-                        <div key={msg.id} className="flex gap-3 px-2 py-2 hover:bg-gray-50 rounded">
-                            <img
-                                src={getAvatarUrl(msg.sender)}
-                                alt={getDisplayName(msg.sender)}
-                                className="w-9 h-9 rounded-lg shrink-0"
-                            />
-                            <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-gray-900 text-sm">
-                                        {getDisplayName(msg.sender)}
-                                    </span>
-                                    <span className="text-xs text-gray-400">
-                                        {formatTime(msg.createdAt)}
-                                    </span>
-                                </div>
-                                <div
-                                    className="text-gray-800 text-sm mt-0.5"
-                                    dangerouslySetInnerHTML={{
-                                        __html: DOMPurify.sanitize(msg.content),
-                                    }}
+                    Object.entries(groupedMessages).map(([date, msgs]) => (
+                        <div key={date}>
+                            {/* Reuse the same date divider as channel view */}
+                            <DividerDate date={date} />
+
+                            {msgs.map((item) => (
+                                // Reuse SlackMessage — the same component used in channel view.
+                                // Pass an empty channelId string; reactions are no-op for DMs.
+                                <SlackMessage
+                                    key={item.id}
+                                    id={`dm-msg-${item.id}`}
+                                    state="message"
+                                    avatar={getAvatarUrl(item.sender)}
+                                    username={getDisplayName(item.sender)}
+                                    time={item.createdAt}
+                                    text={item.content}
+                                    messageId={item.id}
+                                    channelId=""
+                                    currentUserId={user?.id ?? null}
+                                    files={[]}
+                                    reactions={[]}
+                                    replies={0}
+                                    lastReply=""
+                                    onCommentClick={() => {}}
+                                    onReactionUpdate={handleReactionUpdate}
                                 />
-                            </div>
+                            ))}
                         </div>
                     ))
                 )}
                 <div ref={bottomRef} />
             </div>
 
-            {/* Editor */}
-            <div className="shrink-0 px-4 pb-4 pt-2 border-t border-gray-100">
-                <DmEditor
+            {/* ── Editor — reuses MessageEditor in DM mode ── */}
+            <div className="w-full z-10 px-4 pb-4 shrink-0">
+                <MessageEditor
                     userData={user}
-                    conversationId={conversationId}
-                    onMessageSent={(msg: DmMessageItem) =>
-                        setMessages((prev) => [...prev, msg])
-                    }
+                    dmConversationId={conversationId}
+                    placeholder={`Message ${otherUserName}`}
                 />
             </div>
         </div>
