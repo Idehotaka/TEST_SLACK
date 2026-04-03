@@ -257,6 +257,7 @@ export default function DmPage({ conversationId }: DmPageProps) {
                         onCloseThread={closeThread}
                         userData={user}
                         dmConversationId={conversationId}
+                        workspaceId={workspaceId}
                     />
                 </div>
             )}

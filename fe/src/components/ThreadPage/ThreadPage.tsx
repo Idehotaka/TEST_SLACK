@@ -3,6 +3,7 @@
 import { useSocket } from "@/providers/SocketProvider";
 import { useThreadStore } from "@/store/thread-store";
 import { ReactionView } from "@/lib/api/reactions";
+import { toggleDmReaction } from "@/lib/api/dm";
 import MessageEditor from "@/components/ui/messageEditor/MessageEditor";
 import { useEffect, useRef } from "react";
 import { FaEllipsisH, FaRegWindowMaximize, FaTimes } from "react-icons/fa";
@@ -21,6 +22,8 @@ interface ThreadProps {
   channelId?: string;
   /** Set when the thread belongs to a DM conversation */
   dmConversationId?: string;
+  /** Required in DM mode to call the DM reaction endpoint */
+  workspaceId?: string;
 }
 
 export const Thread: React.FC<ThreadProps> = ({
@@ -28,6 +31,7 @@ export const Thread: React.FC<ThreadProps> = ({
   userData,
   channelId,
   dmConversationId,
+  workspaceId,
 }) => {
   const { socket } = useSocket();
   const {
@@ -39,9 +43,6 @@ export const Thread: React.FC<ThreadProps> = ({
   } = useThreadStore();
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
-
-  // The conversation id used for socket room scoping
-  const roomId = dmConversationId ? `dm:${dmConversationId}` : channelId;
 
   useEffect(() => {
     if (!socket || !selectedMessage) return;
@@ -57,7 +58,6 @@ export const Thread: React.FC<ThreadProps> = ({
       updateThreadMessageReactions(payload.messageId, payload.reactions);
     };
 
-    // Listen on the correct event name depending on mode
     const threadEvent = dmConversationId ? "new_dm_thread_message" : "new_thread_message";
     const reactionEvent = dmConversationId ? "dm_reaction_updated" : "reaction_updated";
 
@@ -78,16 +78,27 @@ export const Thread: React.FC<ThreadProps> = ({
 
   const getDisplayName = (sender: any) => sender?.dispname || "Slack_User";
 
-  const handleReactionUpdate = (messageId: string, reactions: ReactionView[]) => {
+  // Channel reaction handler — used when channelId is set
+  const handleChannelReactionUpdate = (messageId: string, reactions: ReactionView[]) => {
     updateThreadMessageReactions(messageId, reactions);
-    if (socket) {
-      if (dmConversationId) {
-        // DM reaction broadcast
-        socket.emit("toggle_dm_reaction", { conversationId: dmConversationId, messageId, reactions });
-      } else if (channelId) {
-        // Channel reaction broadcast
-        socket.emit("toggle_reaction", { channelId, messageId, reactions });
-      }
+    if (socket && channelId) {
+      socket.emit("toggle_reaction", { channelId, messageId, reactions });
+    }
+  };
+
+  // DM reaction handler — called from onDmReactionSelect in SlackMessage
+  const handleDmReactionSelect = async (messageId: string, emoji: string) => {
+    if (!userData?.id || !workspaceId || !dmConversationId) return;
+    try {
+      const result = await toggleDmReaction(workspaceId, dmConversationId, messageId, emoji, userData.id);
+      updateThreadMessageReactions(messageId, result.reactions);
+      socket?.emit("toggle_dm_reaction", {
+        conversationId: dmConversationId,
+        messageId,
+        reactions: result.reactions,
+      });
+    } catch (err) {
+      console.error("Failed to toggle DM thread reaction:", err);
     }
   };
 
@@ -129,7 +140,10 @@ export const Thread: React.FC<ThreadProps> = ({
                 channelId={channelId ?? ""}
                 currentUserId={userData?.id ?? null}
                 onCommentClick={() => {}}
-                onReactionUpdate={handleReactionUpdate}
+                onReactionUpdate={handleChannelReactionUpdate}
+                onDmReactionSelect={dmConversationId
+                  ? (emoji) => handleDmReactionSelect(rootMsg.id, emoji)
+                  : undefined}
               />
             )}
 
@@ -158,7 +172,10 @@ export const Thread: React.FC<ThreadProps> = ({
                 channelId={channelId ?? ""}
                 currentUserId={userData?.id ?? null}
                 onCommentClick={() => {}}
-                onReactionUpdate={handleReactionUpdate}
+                onReactionUpdate={handleChannelReactionUpdate}
+                onDmReactionSelect={dmConversationId
+                  ? (emoji) => handleDmReactionSelect(reply.id, emoji)
+                  : undefined}
               />
             ))}
 
@@ -173,7 +190,7 @@ export const Thread: React.FC<ThreadProps> = ({
         )}
       </div>
 
-      {/* Reply editor — works in both channel and DM thread mode */}
+      {/* Reply editor */}
       <div className="shrink-0 px-3 pb-4 pt-2 border-t border-gray-100">
         <MessageEditor
           userData={userData}
